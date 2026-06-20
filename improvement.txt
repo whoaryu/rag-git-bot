@@ -1,0 +1,85 @@
+🔴
+Chunking strategy — "symbol-aware" is a goal, not an implementation
+The AI will ask: do I use tree-sitter? regex? Language Server Protocol? Split on blank lines? Your spec doesn't say. Without guidance, it'll pick the simplest approach (split on blank lines) which breaks for complex files. You need to specify the approach per language.
+→ Add: use regex-based chunking for JS/TS (split on function/class declarations), tree-sitter for Python, fall back to paragraph splitting for non-code files. Max chunk size = 60 lines.
+🔴
+Qdrant collection schema unspecified — AI will create a bad one
+What fields does each Qdrant point store? Without this, the AI will decide — and you'll need to re-index the entire codebase when you realise the metadata is wrong. Define the payload shape once, upfront.
+→ Add the exact Qdrant point payload schema (see below)
+🔴
+GitHub App vs OAuth App — never specified
+For webhooks and posting PR comments you need a GitHub App (not OAuth). The AI might build OAuth-based auth instead, which can't post review comments at the repo level without user consent flows. This is a 2-hour architectural mistake to undo.
+→ Add: use GitHub App (not OAuth App). Store app private key in env var. Use @octokit/app for authentication. Webhook secret verified via HMAC-SHA256.
+🔴
+Streaming implementation — "stream-friendly" is not enough
+The AI doesn't know: does the stream come from the LLM API directly or get buffered server-side? What's the SSE event format? How does the React frontend accumulate chunks? Specify the data flow exactly.
+→ Add: pipe Anthropic stream → Node SSE response → React EventSource accumulates chunks into message state
+🟡
+PR review output format unspecified — AI will post wall-of-text comments
+Without a structured output schema, the AI will instruct the LLM to return plain text and then dump it as a single PR comment. You want per-line inline comments. This requires a specific JSON schema for LLM output and specific GitHub API calls.
+→ Add the exact LLM output JSON schema and GitHub pull review API call pattern (see below)
+What to add to your spec
+1. Qdrant point payload schema
+Collection name: "codebase_{repoId}"
+Vector size: 1536 (text-embedding-3-small)
+Distance: Cosine
+
+Each point payload:
+{
+  repo_id: string,
+  file_path: string,       // e.g. "src/auth/middleware.ts"
+  start_line: number,
+  end_line: number,
+  symbol_name: string | null, // function/class name if detected
+  symbol_type: 'function' | 'class' | 'block' | 'file',
+  content: string,            // raw source text of the chunk
+  language: string,           // "typescript", "python", etc.
+  indexed_at: string          // ISO timestamp
+}
+2. Chunking strategy per file type
+JS/TS:   split on /^(export\s+)?(async\s+)?function|^(export\s+)?class|
+          const \w+ = (async\s+)?\(/m  — regex on line starts
+Python:  split on /^(def |class )/m
+Other:   split on double newline (paragraph)
+Max chunk: 60 lines. If a function exceeds 60 lines, split at 60 and
+           carry the function signature into the next chunk as context header.
+Min chunk: 3 lines. Discard smaller chunks.
+Skip:    node_modules/, .git/, dist/, *.min.js, *.lock files
+3. Streaming pipeline — exact data flow
+POST /ask { repoId, question, conversationHistory? }
+  → embed question (OpenAI)
+  → Qdrant search top 5 (filter by repo_id)
+  → build prompt: system + retrieved chunks + question
+  → anthropic.messages.stream(...)  // streaming SDK
+  → pipe to SSE: res.write("data: {chunk}\n\n") per token
+  → on stream end: res.write("data: [DONE]\n\n")
+
+React: const es = new EventSource('/ask')
+       es.onmessage = e => setMessage(m => m + e.data)
+       Citations appended AFTER stream completes as a separate event.
+4. PR review LLM output schema + GitHub API call
+LLM must return ONLY this JSON (add to system prompt):
+{
+  issues: [{
+    file: string,
+    line: number,
+    type: 'bug'|'security'|'n+1'|'error-handling'|'style',
+    severity: 'high'|'medium'|'low',
+    suggestion: string   // max 2 sentences, actionable
+  }]
+}
+
+Filter: only post issues where severity !== 'low' (unless user opted in)
+GitHub API: POST /repos/{owner}/{repo}/pulls/{pull_number}/reviews
+Body: { event: 'COMMENT', comments: [{ path, line, body }] }
+One review per PR (not individual comments) = cleaner notification
+5. Incremental re-indexing strategy
+On push webhook:
+1. Get changed files: GET /repos/{owner}/{repo}/commits/{sha}
+   → response.files[].filename
+2. For each changed file:
+   a. Qdrant delete: filter by { repo_id, file_path }
+   b. Re-fetch file content: GET /repos/{owner}/{repo}/contents/{path}
+   c. Re-chunk + re-embed + re-insert
+3. Do NOT re-clone the full repo
+4. Log: { repo_id, files_updated: N, duration_ms } to Postgres

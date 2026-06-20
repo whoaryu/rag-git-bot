@@ -1,0 +1,59 @@
+Build a two-part developer tool:
+1) a RAG-based codebase assistant
+2) an AI Git bot for changelog generation and PR review
+
+Use:
+- Node.js + TypeScript backend
+- React frontend
+- Qdrant as the vector database
+- OpenAI embeddings for indexing
+- Claude or another LLM for answering and review generation
+- GitHub API and GitHub webhooks for repo automation
+- PostgreSQL for metadata if needed
+
+Part 1: Codebase assistant
+- Accept a GitHub repo URL
+- Clone the repository
+- Chunk code by function, class, or meaningful code block, not by arbitrary character count
+- Generate embeddings for each chunk
+- Store embeddings with metadata such as file path, line numbers, and symbol name
+- Allow the user to ask questions about the repository
+- Retrieve the top matching chunks and generate a grounded answer
+- Always show citations back to file and line number
+- Support re-indexing on demand
+
+Part 2: AI Git bot
+- Listen to GitHub webhook events for pull requests and pushes
+- Generate release notes from conventional commits
+- Review pull requests and leave structured review comments
+- Flag possible bugs, secret leaks, missing error handling, and N+1 patterns
+- Produce clean, actionable comments instead of generic AI fluff
+
+Architecture expectations:
+- Keep indexing, retrieval, and generation separate
+- Make chunking symbol-aware
+- Keep all retrieval grounded in source text
+- Do not fine-tune; use RAG because the codebase changes often
+- Make the answer pipeline stream-friendly in the UI
+
+Deliverables:
+- Repo ingestion pipeline
+- Embedding/indexing pipeline
+- Ask endpoint for codebase Q&A
+- GitHub webhook integration
+- PR review generator
+- Release note generator
+- React UI for chat and 
+
+Retrieval quality evaluation — the most important gap
+Build a small test set: 20 question-answer pairs about a sample repo. After indexing, run all 20 questions and measure Hit Rate @ 5 (did the correct chunk appear in the top 5 results?). Log this number. Without it, "RAG-powered assistant" is just a claim. With it: "achieved 87% hit rate @ 5 on a 200-file codebase." That's a resume bullet with teeth.
+→ "How do you know your retrieval is actually finding the right code?" — now covered
+Incremental re-indexing — not full re-clone on every push
+Your spec says "re-index on demand" but doesn't describe the strategy. Add: on push webhook, fetch only the changed files (GitHub API returns changed file list per commit). Delete old embeddings for changed files from Qdrant, re-embed only those files. Full re-clone on every push is slow and expensive — this is the production approach.
+→ "Your push webhook triggers — how long does re-indexing take?" — now you have an efficient answer
+PR review quality gate — don't post noise
+Add a confidence threshold: if the LLM's review for a chunk has no concrete issue to flag (LLM returns an empty issues list), post nothing for that file. Right now, "clean, actionable comments" is stated as a goal but there's no mechanism to enforce it. Add a structured output schema (JSON with issue type, severity, line, suggestion) and filter out anything with severity: 'low' unless explicitly opted in.
+→ "How do you avoid review comment spam?" — shows product thinking in a technical project
+Changelog: conventional commits fallback strategy
+Your spec assumes conventional commits. Most real repos don't use them. Add: if a commit message doesn't match feat:/fix:/chore: pattern, pass it to the LLM to classify it. Build a small classification prompt: "Given this commit message, classify it as: feature, fix, chore, refactor, or unknown." This makes the changelog generator work on any repo, not just greenfield projects.
+→ Shows you've thought about real-world messiness, not just happy-path repos
