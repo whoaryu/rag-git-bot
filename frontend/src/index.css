@@ -64,8 +64,8 @@ body {
 
 /* Scrollbar Customization */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -78,19 +78,11 @@ body {
   background: hsla(217, 30%, 30%, 0.8);
 }
 
-/* Glassmorphism Styles */
-.glass-panel {
-  background: var(--bg-surface);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  transition: border-color var(--transition-normal), transform var(--transition-normal);
-}
-
-.glass-panel:hover {
-  border-color: hsla(217, 30%, 30%, 0.8);
+/* Layout */
+.app-container {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* Typography elements */
@@ -109,13 +101,6 @@ a:hover {
   color: var(--primary-hover);
 }
 
-/* Layout Utilities */
-.app-container {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-}
-
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -123,7 +108,7 @@ a:hover {
   justify-content: center;
   gap: 8px;
   font-family: var(--font-sans);
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   font-weight: 500;
   padding: 10px 18px;
   border-radius: var(--radius-md);
@@ -135,13 +120,14 @@ a:hover {
 }
 
 .btn-primary {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), hsl(260, 95%, 65%));
   color: hsl(224, 71%, 4%);
   box-shadow: var(--shadow-glow);
 }
 .btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
+  background: linear-gradient(135deg, var(--primary-hover), hsl(260, 95%, 72%));
   transform: translateY(-1px);
+  box-shadow: 0 0 28px 0 hsla(250, 95%, 70%, 0.35);
 }
 .btn-primary:active:not(:disabled) {
   transform: translateY(1px);
@@ -182,7 +168,7 @@ a:hover {
 .input-field {
   width: 100%;
   font-family: var(--font-sans);
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   background: var(--bg-input);
   color: var(--text-main);
   border: 1px solid var(--border-color);
@@ -193,10 +179,14 @@ a:hover {
 }
 .input-field:focus {
   border-color: var(--border-color-focus);
-  box-shadow: 0 0 0 2px var(--primary-glow);
+  box-shadow: 0 0 0 3px var(--primary-glow);
 }
 .input-field::placeholder {
   color: var(--text-disabled);
+}
+.input-field:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Loading Spinner */
@@ -209,16 +199,37 @@ a:hover {
   animation: spin 0.8s linear infinite;
 }
 
+/* Keyframes */
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-/* Keyframes for animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Selection color */
+::selection {
+  background: hsla(250, 95%, 70%, 0.3);
+  color: var(--text-main);
 }

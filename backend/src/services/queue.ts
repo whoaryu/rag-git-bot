@@ -1,5 +1,5 @@
 import { Queue, Worker } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis } from 'ioredis';
 import { pool } from '../config/db.js';
 import { cloneRepo, getRepoFiles, cleanupRepo } from './cloner.js';
 import { chunkFile } from './chunker.js';
@@ -10,12 +10,12 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
 // Setup connection shared for BullMQ
 console.log(`Initializing Redis client at: ${REDIS_URL}`);
-export const redisConnection = new IORedis(REDIS_URL, {
+export const redisConnection = new Redis(REDIS_URL, {
   maxRetriesPerRequest: null,
 });
 
 export const indexingQueue = new Queue('repo-indexing', {
-  connection: redisConnection,
+  connection: redisConnection as any,
 });
 
 export const indexingWorker = new Worker(
@@ -103,7 +103,7 @@ export const indexingWorker = new Worker(
       await cleanupRepo(String(repoId));
     }
   },
-  { connection: redisConnection }
+  { connection: redisConnection as any }
 );
 
 export async function addIndexingJob(repoId: number, githubUrl: string) {

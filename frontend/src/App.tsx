@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   GitBranch, 
   MessageSquare, 
@@ -9,13 +9,19 @@ import {
   Terminal, 
   CheckCircle, 
   AlertTriangle, 
-  ChevronRight, 
   Github, 
   Code,
   Info,
   Clock,
-  Layers,
-  X
+  X,
+  Zap,
+  BookOpen,
+  ArrowRight,
+  Database,
+  Cpu,
+  Search,
+  Shield,
+  Sparkles
 } from 'lucide-react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 
@@ -65,42 +71,82 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [activeStreamingText, setActiveStreamingText] = useState('');
-  const [activeCitations, setActiveCitations] = useState<Citation[]>([]);
+  const [_activeCitations, setActiveCitations] = useState<Citation[]>([]);
   
   // Modals & Panels
   const [showLogsRepoId, setShowLogsRepoId] = useState<number | null>(null);
   const [indexLogs, setIndexLogs] = useState<IndexLog[]>([]);
   const [activeCodeDrawer, setActiveCodeDrawer] = useState<Citation | null>(null);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   const [loadingRepos, setLoadingRepos] = useState(false);
   const [addingRepo, setAddingRepo] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<'checking' | 'online' | 'offline'>('checking');
 
+  // Refs for stable SSE closure access
+  const streamingTextRef = useRef('');
+  const streamingCitationsRef = useRef<Citation[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Check backend connection on mount
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        const res = await fetch(`${API_BASE.replace('/api', '')}/health`);
+        if (res.ok) setBackendStatus('online');
+        else setBackendStatus('offline');
+      } catch {
+        setBackendStatus('offline');
+      }
+    };
+    checkHealth();
+    const interval = setInterval(checkHealth, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Show tutorial on first visit
+  useEffect(() => {
+    const hasSeenTutorial = localStorage.getItem('rag-git-bot-tutorial-seen');
+    if (!hasSeenTutorial) {
+      setShowTutorial(true);
+    }
+  }, []);
+
+  const dismissTutorial = () => {
+    setShowTutorial(false);
+    localStorage.setItem('rag-git-bot-tutorial-seen', 'true');
+  };
+
   // Fetch Repositories list
-  const fetchRepos = async () => {
+  const fetchRepos = useCallback(async () => {
     setLoadingRepos(true);
     try {
       const res = await fetch(`${API_BASE}/repos`);
       const data = await res.json();
       if (data.repositories) {
         setRepositories(data.repositories);
-        // Sync selected repository details if one was selected
-        if (selectedRepo) {
-          const updated = data.repositories.find((r: Repository) => r.id === selectedRepo.id);
-          if (updated) setSelectedRepo(updated);
-        }
       }
     } catch (err) {
       console.error('Failed to load repositories:', err);
     } finally {
       setLoadingRepos(false);
     }
-  };
+  }, []);
+
+  // Sync selected repo details when repositories list updates
+  useEffect(() => {
+    if (selectedRepo) {
+      const updated = repositories.find((r) => r.id === selectedRepo.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(selectedRepo)) {
+        setSelectedRepo(updated);
+      }
+    }
+  }, [repositories]);
 
   useEffect(() => {
     fetchRepos();
-  }, []);
+  }, [fetchRepos]);
 
   // Poll indexing repositories
   useEffect(() => {
@@ -112,7 +158,7 @@ export default function App() {
     }, 4000);
 
     return () => clearInterval(timer);
-  }, [repositories]);
+  }, [repositories, fetchRepos]);
 
   // Load chat history when selected repository changes
   useEffect(() => {
@@ -211,7 +257,7 @@ export default function App() {
     }
   };
 
-  // Ask RAG Assistant
+  // Ask RAG Assistant — uses refs for stable closure access
   const handleAsk = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !selectedRepo || isStreaming) return;
@@ -221,6 +267,8 @@ export default function App() {
     setIsStreaming(true);
     setActiveStreamingText('');
     setActiveCitations([]);
+    streamingTextRef.current = '';
+    streamingCitationsRef.current = [];
 
     // Optimistically add user message to list
     setChatMessages(prev => [...prev, { sender: 'user', message: userQuestion }]);
@@ -241,29 +289,51 @@ export default function App() {
           try {
             const parsed = JSON.parse(ev.data);
             if (parsed.type === 'text') {
-              setActiveStreamingText(prev => prev + parsed.content);
+              streamingTextRef.current += parsed.content;
+              setActiveStreamingText(streamingTextRef.current);
             } else if (parsed.type === 'citations') {
-              setActiveCitations(parsed.citations || []);
+              streamingCitationsRef.current = parsed.citations || [];
+              setActiveCitations(streamingCitationsRef.current);
             } else if (parsed.type === 'error') {
-              setActiveStreamingText(prev => prev + `\n[Error: ${parsed.message}]`);
+              streamingTextRef.current += `\n[Error: ${parsed.message}]`;
+              setActiveStreamingText(streamingTextRef.current);
             }
-          } catch (e) {
-            console.error('JSON parse error on SSE token:', e);
+          } catch (parseErr) {
+            console.error('JSON parse error on SSE token:', parseErr);
           }
         },
         onclose() {
-          // Finalize streaming
+          // Use refs for stable access to accumulated values
+          const finalText = streamingTextRef.current;
+          const finalCitations = streamingCitationsRef.current;
           setIsStreaming(false);
-          setChatMessages(prev => [
-            ...prev,
-            { sender: 'bot', message: activeStreamingText, citations: activeCitations }
-          ]);
+          if (finalText) {
+            setChatMessages(prev => [
+              ...prev,
+              { sender: 'bot', message: finalText, citations: finalCitations }
+            ]);
+          }
           setActiveStreamingText('');
           setActiveCitations([]);
+          streamingTextRef.current = '';
+          streamingCitationsRef.current = [];
         },
         onerror(err) {
           console.error('SSE Error:', err);
+          // Commit whatever we had before error
+          const finalText = streamingTextRef.current;
+          const finalCitations = streamingCitationsRef.current;
           setIsStreaming(false);
+          if (finalText) {
+            setChatMessages(prev => [
+              ...prev,
+              { sender: 'bot', message: finalText + '\n\n[Stream interrupted]', citations: finalCitations }
+            ]);
+          }
+          setActiveStreamingText('');
+          setActiveCitations([]);
+          streamingTextRef.current = '';
+          streamingCitationsRef.current = [];
           throw err;
         }
       });
@@ -273,67 +343,224 @@ export default function App() {
     }
   };
 
+  // Simple markdown-like rendering for bot messages
+  const renderBotMessage = (text: string) => {
+    // Split by code blocks first
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('```') && part.endsWith('```')) {
+        const inner = part.slice(3, -3);
+        const firstNewline = inner.indexOf('\n');
+        const lang = firstNewline > 0 ? inner.slice(0, firstNewline).trim() : '';
+        const code = firstNewline > 0 ? inner.slice(firstNewline + 1) : inner;
+        return (
+          <pre key={i} style={{
+            background: 'hsla(222, 47%, 6%, 0.9)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            padding: '14px 16px',
+            margin: '8px 0',
+            overflow: 'auto',
+            fontSize: '0.82rem',
+            lineHeight: '1.5',
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          }}>
+            {lang && <div style={{ fontSize: '0.7rem', color: 'var(--text-disabled)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{lang}</div>}
+            <code>{code}</code>
+          </pre>
+        );
+      }
+      // Handle inline code, bold, and line breaks
+      return (
+        <span key={i}>
+          {part.split('\n').map((line, j) => (
+            <React.Fragment key={j}>
+              {j > 0 && <br />}
+              {line.split(/(`[^`]+`)/).map((segment, k) => {
+                if (segment.startsWith('`') && segment.endsWith('`')) {
+                  return (
+                    <code key={k} style={{
+                      background: 'hsla(222, 47%, 15%, 0.8)',
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      fontSize: '0.85em',
+                      fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                      color: 'var(--primary)',
+                    }}>
+                      {segment.slice(1, -1)}
+                    </code>
+                  );
+                }
+                // Handle **bold**
+                return segment.split(/(\*\*[^*]+\*\*)/).map((s, l) => {
+                  if (s.startsWith('**') && s.endsWith('**')) {
+                    return <strong key={l}>{s.slice(2, -2)}</strong>;
+                  }
+                  return s;
+                });
+              })}
+            </React.Fragment>
+          ))}
+        </span>
+      );
+    });
+  };
+
+  // Tutorial step content
+  const tutorialSteps = [
+    {
+      icon: <Sparkles size={32} style={{ color: 'var(--primary)' }} />,
+      title: 'Welcome to RAG Git Bot',
+      description: 'Your AI-powered codebase assistant and automated code reviewer. Index any public GitHub repository and ask questions grounded in real code with citations.',
+    },
+    {
+      icon: <Database size={32} style={{ color: 'var(--accent-info)' }} />,
+      title: 'Step 1: Start Infrastructure',
+      description: 'Make sure Docker Desktop is running, then execute this command in the project root to launch PostgreSQL, Redis, and Qdrant:',
+      code: 'docker-compose up -d',
+    },
+    {
+      icon: <Cpu size={32} style={{ color: 'var(--accent-success)' }} />,
+      title: 'Step 2: Configure API Keys',
+      description: 'Copy backend/.env.example to backend/.env and add your API keys:',
+      code: '# Required Keys:\nGEMINI_API_KEY=...  # Google AI Studio (embeddings)\nGROQ_API_KEY=...    # Groq Console (chat LLM)',
+    },
+    {
+      icon: <Zap size={32} style={{ color: 'var(--accent-warning)' }} />,
+      title: 'Step 3: Start the Servers',
+      description: 'Run the backend and frontend development servers in separate terminals:',
+      code: '# Terminal 1 (Backend):\ncd backend && npm run dev\n\n# Terminal 2 (Frontend):\ncd frontend && npm run dev',
+    },
+    {
+      icon: <Search size={32} style={{ color: 'var(--primary)' }} />,
+      title: 'Step 4: Index & Ask',
+      description: 'Paste a public GitHub repo URL in the sidebar, wait for indexing to complete, then ask any question about the code. The AI will answer using only the indexed code with file citations.',
+    },
+    {
+      icon: <Shield size={32} style={{ color: 'var(--accent-danger)' }} />,
+      title: 'Bonus: GitHub App Webhooks',
+      description: 'Optionally configure a GitHub App to enable automatic push-to-index updates and AI-powered pull request code reviews. Click "Setup GitHub Webhooks" in the sidebar for details.',
+    },
+  ];
+
   return (
     <div className="app-container" style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
       
       {/* Sidebar: Repositories list */}
-      <aside className="glass-panel" style={{ width: '350px', borderRight: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', flexShrink: 0, borderRadius: 0, margin: 0, background: 'var(--bg-surface)' }}>
+      <aside style={{ 
+        width: '360px', 
+        borderRight: '1px solid var(--border-color)', 
+        display: 'flex', 
+        flexDirection: 'column', 
+        flexShrink: 0, 
+        background: 'var(--bg-surface)',
+        position: 'relative',
+      }}>
         
         {/* Brand header */}
-        <div style={{ padding: '24px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ background: 'var(--primary-glow)', border: '1px solid var(--primary)', borderRadius: '10px', padding: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <GitBranch size={22} style={{ color: 'var(--primary)' }} />
+        <div style={{ 
+          padding: '24px 20px', 
+          borderBottom: '1px solid var(--border-color)', 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ 
+              background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.3))', 
+              border: '1px solid var(--primary)', 
+              borderRadius: '12px', 
+              padding: '10px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              boxShadow: 'var(--shadow-glow)',
+            }}>
+              <GitBranch size={22} style={{ color: 'var(--primary)' }} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '1.2rem', fontWeight: 700, background: 'linear-gradient(135deg, var(--text-main), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RAG Git Bot</h1>
+              <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', letterSpacing: '0.04em' }}>AI Assistant & Code Reviewer</p>
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>RAG Git Bot</h1>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>AI Assistant & Reviewer</p>
+          
+          {/* Backend status indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ 
+              width: '8px', 
+              height: '8px', 
+              borderRadius: '50%', 
+              background: backendStatus === 'online' ? 'var(--accent-success)' : backendStatus === 'offline' ? 'var(--accent-danger)' : 'var(--accent-warning)',
+              boxShadow: backendStatus === 'online' ? '0 0 8px var(--accent-success)' : 'none',
+              animation: backendStatus === 'checking' ? 'pulse 1.5s infinite' : backendStatus === 'online' ? 'pulse 3s infinite' : 'none',
+            }} />
+            <span style={{ fontSize: '0.65rem', color: 'var(--text-disabled)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {backendStatus === 'online' ? 'Connected' : backendStatus === 'offline' ? 'Offline' : 'Checking...'}
+            </span>
           </div>
         </div>
 
         {/* Repos Ingestion form */}
         <div style={{ padding: '20px', borderBottom: '1px solid var(--border-color)' }}>
           <form onSubmit={handleAddRepo} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Ingest Github URL</label>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Index a Repository</label>
             <div style={{ display: 'flex', gap: '8px' }}>
               <input
+                id="github-url-input"
                 type="text"
                 placeholder="https://github.com/owner/repo"
                 value={githubUrlInput}
                 onChange={(e) => setGithubUrlInput(e.target.value)}
-                disabled={addingRepo}
+                disabled={addingRepo || backendStatus === 'offline'}
                 className="input-field"
                 style={{ padding: '10px 14px' }}
               />
               <button 
                 type="submit" 
                 className="btn btn-primary" 
-                disabled={addingRepo || !githubUrlInput}
+                disabled={addingRepo || !githubUrlInput || backendStatus === 'offline'}
                 style={{ padding: '10px 14px' }}
               >
-                {addingRepo ? <RefreshCw className="spinner" size={16} /> : 'Add'}
+                {addingRepo ? <RefreshCw className="spinner" size={16} /> : <Zap size={16} />}
               </button>
             </div>
           </form>
           
-          <button 
-            onClick={() => setShowInstructions(true)}
-            style={{ width: '100%', marginTop: '12px', background: 'transparent', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '10px', borderRadius: '8px', fontSize: '0.85rem' }}
-          >
-            <Info size={16} /> Setup GitHub Webhooks
-          </button>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+            <button 
+              id="tutorial-button"
+              onClick={() => { setShowTutorial(true); setTutorialStep(0); }}
+              style={{ flex: 1, background: 'transparent', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '9px', borderRadius: '8px', fontSize: '0.8rem', transition: 'all 0.2s', fontFamily: 'var(--font-sans)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+            >
+              <BookOpen size={14} /> Getting Started
+            </button>
+            <button 
+              id="webhook-setup-button"
+              onClick={() => setShowInstructions(true)}
+              style={{ flex: 1, background: 'transparent', border: '1px dashed var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '9px', borderRadius: '8px', fontSize: '0.8rem', transition: 'all 0.2s', fontFamily: 'var(--font-sans)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-info)'; e.currentTarget.style.color = 'var(--accent-info)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+            >
+              <Info size={14} /> Webhooks
+            </button>
+          </div>
         </div>
 
         {/* Repository list items */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <h2 style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Repositories</h2>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <h2 style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '0 4px', marginBottom: '4px' }}>Repositories</h2>
           
           {loadingRepos && repositories.length === 0 ? (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '30px' }}>
               <div className="spinner"></div>
             </div>
           ) : repositories.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-disabled)', fontSize: '0.9rem' }}>
-              No repositories added yet. Start by entering a public GitHub URL above.
+            <div style={{ textAlign: 'center', padding: '40px 16px', color: 'var(--text-disabled)', fontSize: '0.85rem', lineHeight: '1.6' }}>
+              <Github size={36} style={{ color: 'var(--border-color)', marginBottom: '12px' }} />
+              <p style={{ fontWeight: 500, color: 'var(--text-muted)', marginBottom: '6px' }}>No repositories yet</p>
+              <p>Paste a public GitHub URL above to start indexing a codebase.</p>
             </div>
           ) : (
             repositories.map(repo => {
@@ -341,6 +568,7 @@ export default function App() {
               return (
                 <div 
                   key={repo.id}
+                  id={`repo-card-${repo.id}`}
                   onClick={() => setSelectedRepo(repo)}
                   style={{
                     padding: '16px',
@@ -349,9 +577,9 @@ export default function App() {
                     border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}`,
                     cursor: 'pointer',
                     transition: 'all 0.25s',
-                    position: 'relative'
+                    position: 'relative',
+                    boxShadow: isSelected ? 'var(--shadow-glow)' : 'none',
                   }}
-                  className="glass-panel"
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
@@ -363,14 +591,14 @@ export default function App() {
                     
                     {/* Status Badge */}
                     <span style={{ 
-                      fontSize: '0.7rem', 
-                      padding: '2px 8px', 
+                      fontSize: '0.68rem', 
+                      padding: '3px 8px', 
                       borderRadius: '12px', 
                       fontWeight: 600,
                       background: 
-                        repo.status === 'completed' ? 'rgba(74, 222, 128, 0.1)' :
-                        repo.status === 'indexing' ? 'rgba(96, 165, 250, 0.1)' :
-                        repo.status === 'failed' ? 'rgba(248, 113, 113, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                        repo.status === 'completed' ? 'rgba(74, 222, 128, 0.12)' :
+                        repo.status === 'indexing' ? 'rgba(96, 165, 250, 0.12)' :
+                        repo.status === 'failed' ? 'rgba(248, 113, 113, 0.12)' : 'rgba(255, 255, 255, 0.05)',
                       color:
                         repo.status === 'completed' ? 'var(--accent-success)' :
                         repo.status === 'indexing' ? 'var(--accent-info)' :
@@ -380,43 +608,54 @@ export default function App() {
                       gap: '4px'
                     }}>
                       {repo.status === 'indexing' && <RefreshCw size={10} className="spinner" />}
+                      {repo.status === 'completed' && <CheckCircle size={10} />}
+                      {repo.status === 'failed' && <AlertTriangle size={10} />}
                       {repo.status}
                     </span>
                   </div>
 
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: '12px' }}>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-disabled)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: '12px' }}>
                     {repo.github_url}
                   </p>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-disabled)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      <Clock size={12} />
-                      {repo.last_indexed_at ? new Date(repo.last_indexed_at).toLocaleDateString() : 'Never'}
+                    <span style={{ fontSize: '0.68rem', color: 'var(--text-disabled)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Clock size={11} />
+                      {repo.last_indexed_at ? new Date(repo.last_indexed_at).toLocaleDateString() : 'Never indexed'}
                     </span>
                     
                     {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: '8px' }} onClick={e => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
                       <button 
+                        id={`logs-btn-${repo.id}`}
                         onClick={() => handleViewLogs(repo.id)} 
                         title="View Indexing Logs" 
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: '4px', borderRadius: '6px', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'hsla(217, 30%, 20%, 0.6)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                       >
-                        <FileText size={15} />
+                        <FileText size={14} />
                       </button>
                       <button 
+                        id={`reindex-btn-${repo.id}`}
                         onClick={() => handleReindex(repo.id)} 
                         title="Force Re-index" 
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex' }}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: '4px', borderRadius: '6px', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'hsla(217, 30%, 20%, 0.6)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                         disabled={repo.status === 'indexing'}
                       >
-                        <RefreshCw size={15} className={repo.status === 'indexing' ? 'spinner' : ''} />
+                        <RefreshCw size={14} className={repo.status === 'indexing' ? 'spinner' : ''} />
                       </button>
                       <button 
+                        id={`delete-btn-${repo.id}`}
                         onClick={() => handleDeleteRepo(repo.id, repo.name)} 
                         title="Delete Repo" 
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--accent-danger)', display: 'flex' }}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--accent-danger)', display: 'flex', padding: '4px', borderRadius: '6px', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'hsla(346, 84%, 61%, 0.1)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                       >
-                        <Trash2 size={15} />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </div>
@@ -424,6 +663,16 @@ export default function App() {
               );
             })
           )}
+        </div>
+
+        {/* Sidebar footer */}
+        <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-disabled)' }}>
+            {repositories.length} repo{repositories.length !== 1 ? 's' : ''} indexed
+          </span>
+          <span style={{ fontSize: '0.68rem', color: 'var(--text-disabled)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Cpu size={10} /> Gemini + Groq
+          </span>
         </div>
       </aside>
 
@@ -433,17 +682,33 @@ export default function App() {
         {selectedRepo ? (
           <>
             {/* Top Workspace Header */}
-            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-surface)', backdropFilter: 'blur(10px)' }}>
+            <div style={{ 
+              padding: '16px 24px', 
+              borderBottom: '1px solid var(--border-color)', 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              background: 'var(--bg-surface)', 
+              backdropFilter: 'blur(10px)',
+            }}>
               <div>
-                <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Chatting with {selectedRepo.name}</h2>
-                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Index Status: {selectedRepo.status}</span>
-              </div>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <span style={{ background: 'hsla(217, 30%, 15%, 0.8)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  LLM: Groq (Llama-3)
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <MessageSquare size={18} style={{ color: 'var(--primary)' }} />
+                  {selectedRepo.name}
+                </h2>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                  {selectedRepo.status === 'completed' && <><CheckCircle size={12} style={{ color: 'var(--accent-success)' }} /> Ready to chat</>}
+                  {selectedRepo.status === 'indexing' && <><RefreshCw size={12} className="spinner" style={{ color: 'var(--accent-info)' }} /> Indexing in progress...</>}
+                  {selectedRepo.status === 'failed' && <><AlertTriangle size={12} style={{ color: 'var(--accent-danger)' }} /> Indexing failed</>}
+                  {selectedRepo.status === 'idle' && <><Clock size={12} style={{ color: 'var(--text-disabled)' }} /> Queued for indexing</>}
                 </span>
-                <span style={{ background: 'hsla(217, 30%, 15%, 0.8)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  Embeddings: Gemini (text-embedding-004)
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <span style={{ background: 'hsla(217, 30%, 15%, 0.8)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '5px 12px', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Zap size={12} style={{ color: 'var(--accent-warning)' }} /> Groq Llama-3
+                </span>
+                <span style={{ background: 'hsla(217, 30%, 15%, 0.8)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '5px 12px', fontSize: '0.75rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Sparkles size={12} style={{ color: 'var(--primary)' }} /> Gemini Embeddings
                 </span>
               </div>
             </div>
@@ -452,11 +717,40 @@ export default function App() {
             <div style={{ flex: 1, overflowY: 'auto', padding: '30px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
               {chatMessages.length === 0 && !activeStreamingText && (
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-disabled)' }}>
-                  <MessageSquare size={48} style={{ color: 'var(--border-color)', marginBottom: '16px' }} />
-                  <p style={{ fontWeight: 600, fontSize: '1.1rem', marginBottom: '8px', color: 'var(--text-main)' }}>Ask anything about the codebase</p>
-                  <p style={{ fontSize: '0.85rem', maxWidth: '350px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                    Ask about logic structures, class implementations, bug detections, or where specific systems are written.
+                  <div style={{
+                    width: '80px',
+                    height: '80px',
+                    borderRadius: '20px',
+                    background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.08))',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '20px',
+                  }}>
+                    <Search size={32} style={{ color: 'var(--primary)' }} />
+                  </div>
+                  <p style={{ fontWeight: 600, fontSize: '1.15rem', marginBottom: '8px', color: 'var(--text-main)' }}>Ask anything about the codebase</p>
+                  <p style={{ fontSize: '0.85rem', maxWidth: '400px', textAlign: 'center', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                    Ask about architecture, implementations, bug patterns, or where specific systems are defined. Answers cite real code with file paths and line numbers.
                   </p>
+                  {selectedRepo.status !== 'completed' && (
+                    <div style={{ 
+                      marginTop: '20px', 
+                      padding: '12px 20px', 
+                      borderRadius: '10px', 
+                      background: 'hsla(38, 92%, 50%, 0.08)', 
+                      border: '1px solid hsla(38, 92%, 50%, 0.2)',
+                      fontSize: '0.85rem',
+                      color: 'var(--accent-warning)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}>
+                      <AlertTriangle size={16} />
+                      Repository is still {selectedRepo.status}. Chat will be available after indexing completes.
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -474,14 +768,17 @@ export default function App() {
                   className="animate-fade-in"
                 >
                   <div style={{
-                    fontSize: '0.75rem',
+                    fontSize: '0.72rem',
                     color: 'var(--text-disabled)',
                     alignSelf: msg.sender === 'user' ? 'flex-end' : 'flex-start',
                     fontWeight: 600,
                     textTransform: 'uppercase',
-                    letterSpacing: '0.05em'
+                    letterSpacing: '0.06em',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
                   }}>
-                    {msg.sender === 'user' ? 'User' : 'Assistant'}
+                    {msg.sender === 'user' ? 'You' : <><Sparkles size={10} /> Assistant</>}
                   </div>
                   
                   {/* Message bubble */}
@@ -490,47 +787,58 @@ export default function App() {
                     borderRadius: '16px',
                     borderTopRightRadius: msg.sender === 'user' ? '4px' : '16px',
                     borderTopLeftRadius: msg.sender === 'bot' ? '4px' : '16px',
-                    background: msg.sender === 'user' ? 'var(--primary)' : 'hsla(217, 30%, 15%, 0.7)',
+                    background: msg.sender === 'user' 
+                      ? 'linear-gradient(135deg, var(--primary), hsl(260, 95%, 65%))' 
+                      : 'hsla(217, 30%, 15%, 0.7)',
                     color: msg.sender === 'user' ? 'hsl(224, 71%, 4%)' : 'var(--text-main)',
                     border: `1px solid ${msg.sender === 'user' ? 'transparent' : 'var(--border-color)'}`,
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: '1.5',
-                    fontSize: '0.95rem',
-                    boxShadow: msg.sender === 'user' ? 'var(--shadow-glow)' : 'var(--shadow-sm)'
+                    lineHeight: '1.6',
+                    fontSize: '0.92rem',
+                    boxShadow: msg.sender === 'user' ? 'var(--shadow-glow)' : 'var(--shadow-sm)',
+                    wordBreak: 'break-word',
                   }}>
-                    {msg.message}
+                    {msg.sender === 'bot' ? renderBotMessage(msg.message) : msg.message}
                   </div>
 
                   {/* Render citations */}
                   {msg.citations && msg.citations.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '4px' }}>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', display: 'flex', alignItems: 'center', gap: '4px', width: '100%', marginBottom: '2px' }}>
-                        <Code size={12} /> Citations:
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--text-disabled)', display: 'flex', alignItems: 'center', gap: '4px', width: '100%', marginBottom: '2px' }}>
+                        <Code size={11} /> Source Citations:
                       </span>
                       {msg.citations.map((cite, cIdx) => (
                         <button
                           key={cIdx}
+                          id={`citation-${index}-${cIdx}`}
                           onClick={() => setActiveCodeDrawer(cite)}
                           style={{
                             background: 'hsla(217, 30%, 20%, 0.4)',
                             border: '1px solid var(--border-color)',
-                            borderRadius: '6px',
-                            padding: '4px 10px',
-                            fontSize: '0.75rem',
+                            borderRadius: '8px',
+                            padding: '5px 10px',
+                            fontSize: '0.73rem',
                             color: 'var(--primary)',
                             cursor: 'pointer',
                             transition: 'all 0.2s',
+                            fontFamily: "'JetBrains Mono', monospace",
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.borderColor = 'var(--primary)';
                             e.currentTarget.style.background = 'var(--primary-glow)';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.borderColor = 'var(--border-color)';
                             e.currentTarget.style.background = 'hsla(217, 30%, 20%, 0.4)';
+                            e.currentTarget.style.transform = 'translateY(0)';
                           }}
                         >
-                          {cite.filePath.split('/').pop()}:{cite.startLine}-{cite.endLine} {cite.symbolName ? `(${cite.symbolName})` : ''}
+                          <FileText size={11} />
+                          {cite.filePath.split('/').pop()}:{cite.startLine}-{cite.endLine}
+                          {cite.symbolName && <span style={{ color: 'var(--text-muted)' }}> ({cite.symbolName})</span>}
                         </button>
                       ))}
                     </div>
@@ -541,8 +849,8 @@ export default function App() {
               {/* Streaming AI answer */}
               {activeStreamingText && (
                 <div style={{ display: 'flex', flexDirection: 'column', alignSelf: 'flex-start', maxWidth: '80%', gap: '6px' }} className="animate-fade-in">
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-disabled)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    Assistant
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-disabled)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Sparkles size={10} /> Assistant
                   </div>
                   <div style={{
                     padding: '16px 20px',
@@ -551,11 +859,45 @@ export default function App() {
                     background: 'hsla(217, 30%, 15%, 0.7)',
                     color: 'var(--text-main)',
                     border: '1px solid var(--border-color)',
-                    whiteSpace: 'pre-wrap',
-                    lineHeight: '1.5',
-                    fontSize: '0.95rem'
+                    lineHeight: '1.6',
+                    fontSize: '0.92rem',
+                    wordBreak: 'break-word',
                   }}>
-                    {activeStreamingText}
+                    {renderBotMessage(activeStreamingText)}
+                    <span style={{ 
+                      display: 'inline-block', 
+                      width: '8px', 
+                      height: '16px', 
+                      background: 'var(--primary)', 
+                      marginLeft: '2px',
+                      animation: 'blink 1s step-end infinite',
+                      borderRadius: '1px',
+                      verticalAlign: 'text-bottom',
+                    }} />
+                  </div>
+                </div>
+              )}
+
+              {/* Streaming loading indicator (before first token) */}
+              {isStreaming && !activeStreamingText && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignSelf: 'flex-start', maxWidth: '80%', gap: '6px' }} className="animate-fade-in">
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-disabled)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Sparkles size={10} /> Assistant
+                  </div>
+                  <div style={{
+                    padding: '16px 20px',
+                    borderRadius: '16px',
+                    borderTopLeftRadius: '4px',
+                    background: 'hsla(217, 30%, 15%, 0.7)',
+                    color: 'var(--text-muted)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    fontSize: '0.85rem',
+                  }}>
+                    <div className="spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }} />
+                    Searching code and generating answer...
                   </div>
                 </div>
               )}
@@ -564,28 +906,31 @@ export default function App() {
             </div>
 
             {/* Bottom Chat input box */}
-            <div style={{ padding: '20px 24px', background: 'var(--bg-surface)', borderTop: '1px solid var(--border-color)' }}>
+            <div style={{ padding: '18px 24px', background: 'var(--bg-surface)', borderTop: '1px solid var(--border-color)' }}>
               <form onSubmit={handleAsk} style={{ display: 'flex', gap: '12px' }}>
                 <input
+                  id="chat-input"
                   type="text"
-                  placeholder="Ask a question about the code..."
+                  placeholder={selectedRepo.status === 'completed' ? "Ask a question about the code..." : "Waiting for indexing to complete..."}
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
-                  disabled={isStreaming || selectedRepo.status === 'indexing'}
+                  disabled={isStreaming || selectedRepo.status !== 'completed'}
                   className="input-field"
                   style={{ flex: 1 }}
                 />
                 <button
+                  id="send-button"
                   type="submit"
                   className="btn btn-primary"
-                  disabled={!chatInput.trim() || isStreaming || selectedRepo.status === 'indexing'}
+                  disabled={!chatInput.trim() || isStreaming || selectedRepo.status !== 'completed'}
+                  style={{ minWidth: '80px' }}
                 >
                   {isStreaming ? (
                     <RefreshCw className="spinner" size={18} />
                   ) : (
                     <>
                       <span>Ask</span>
-                      <Send size={16} />
+                      <Send size={15} />
                     </>
                   )}
                 </button>
@@ -595,11 +940,58 @@ export default function App() {
         ) : (
           /* Empty Workspace selection placeholder */
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', color: 'var(--text-disabled)' }}>
-            <GitBranch size={64} style={{ color: 'var(--border-color)', marginBottom: '20px' }} />
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '8px' }}>RAG Git Assistant</h2>
-            <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '400px', textAlign: 'center', lineHeight: '1.6' }}>
-              Select a repository from the sidebar to chat and search code segments, or insert a Github repository URL to trigger initial codebase ingestion.
+            <div style={{
+              width: '100px',
+              height: '100px',
+              borderRadius: '24px',
+              background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.08))',
+              border: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '24px',
+              boxShadow: 'var(--shadow-glow)',
+            }}>
+              <GitBranch size={40} style={{ color: 'var(--primary)' }} />
+            </div>
+            <h2 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '10px', background: 'linear-gradient(135deg, var(--text-main), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RAG Git Assistant</h2>
+            <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '450px', textAlign: 'center', lineHeight: '1.7', marginBottom: '24px' }}>
+              Select a repository from the sidebar to chat and search code segments, or paste a GitHub URL to index a new codebase.
             </p>
+            
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                className="btn btn-primary"
+                onClick={() => { setShowTutorial(true); setTutorialStep(0); }}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                <BookOpen size={16} /> Getting Started Guide
+              </button>
+            </div>
+
+            {backendStatus === 'offline' && (
+              <div style={{ 
+                marginTop: '28px', 
+                padding: '16px 24px', 
+                borderRadius: '12px', 
+                background: 'hsla(346, 84%, 61%, 0.08)', 
+                border: '1px solid hsla(346, 84%, 61%, 0.2)',
+                fontSize: '0.88rem',
+                color: 'var(--accent-danger)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                maxWidth: '460px',
+              }}>
+                <AlertTriangle size={18} />
+                <div>
+                  <strong>Backend server is not reachable.</strong>
+                  <p style={{ fontSize: '0.8rem', marginTop: '4px', color: 'var(--text-muted)' }}>
+                    Make sure Docker services and the backend are running. See the Getting Started guide for details.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -621,7 +1013,7 @@ export default function App() {
           flexDirection: 'column',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
-          animation: 'fadeIn 0.25s ease-out'
+          animation: 'slideInRight 0.25s ease-out'
         }}>
           {/* Header */}
           <div style={{ padding: '20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -630,23 +1022,26 @@ export default function App() {
                 <Code size={18} style={{ color: 'var(--primary)' }} />
                 Code Citation
               </h3>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px' }}>
-                {activeCodeDrawer.filePath} (Lines {activeCodeDrawer.startLine}-{activeCodeDrawer.endLine})
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '4px', fontFamily: "'JetBrains Mono', monospace" }}>
+                {activeCodeDrawer.filePath} (L{activeCodeDrawer.startLine}-{activeCodeDrawer.endLine})
               </p>
             </div>
             <button 
+              id="close-citation-drawer"
               onClick={() => setActiveCodeDrawer(null)}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              style={{ background: 'hsla(217, 30%, 20%, 0.4)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '8px', padding: '6px', display: 'flex', transition: 'all 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--text-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
             >
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
 
           {/* Details metadata */}
-          <div style={{ padding: '16px 20px', background: 'hsla(217, 30%, 8%, 0.4)', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '20px', fontSize: '0.85rem' }}>
+          <div style={{ padding: '14px 20px', background: 'hsla(217, 30%, 8%, 0.4)', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: '24px', fontSize: '0.82rem' }}>
             <div>
               <span style={{ color: 'var(--text-disabled)', fontWeight: 500 }}>Symbol: </span>
-              <span style={{ color: 'var(--text-main)', fontFamily: 'monospace' }}>{activeCodeDrawer.symbolName || 'none'}</span>
+              <span style={{ color: 'var(--primary)', fontFamily: "'JetBrains Mono', monospace" }}>{activeCodeDrawer.symbolName || 'N/A'}</span>
             </div>
             <div>
               <span style={{ color: 'var(--text-disabled)', fontWeight: 500 }}>Type: </span>
@@ -660,9 +1055,9 @@ export default function App() {
             overflow: 'auto',
             padding: '20px',
             margin: 0,
-            fontFamily: 'monospace',
-            fontSize: '0.85rem',
-            lineHeight: '1.5',
+            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+            fontSize: '0.82rem',
+            lineHeight: '1.6',
             background: 'var(--bg-input)',
             color: 'hsl(210, 40%, 90%)',
             whiteSpace: 'pre',
@@ -671,8 +1066,11 @@ export default function App() {
               {activeCodeDrawer.content.split('\n').map((line, index) => {
                 const absoluteLineNum = activeCodeDrawer.startLine + index;
                 return (
-                  <div key={index} style={{ display: 'flex', gap: '16px' }}>
-                    <span style={{ width: '28px', color: 'var(--text-disabled)', textAlign: 'right', userSelect: 'none', display: 'inline-block' }}>
+                  <div key={index} style={{ display: 'flex', gap: '16px', padding: '0 4px' }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'hsla(250, 95%, 70%, 0.04)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ width: '32px', color: 'var(--text-disabled)', textAlign: 'right', userSelect: 'none', display: 'inline-block', flexShrink: 0 }}>
                       {absoluteLineNum}
                     </span>
                     <span>{line}</span>
@@ -699,7 +1097,8 @@ export default function App() {
           display: 'flex',
           flexDirection: 'column',
           backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)'
+          WebkitBackdropFilter: 'blur(20px)',
+          animation: 'slideInRight 0.25s ease-out'
         }}>
           <div style={{ padding: '20px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -707,17 +1106,21 @@ export default function App() {
               Indexing History
             </h3>
             <button 
+              id="close-logs-drawer"
               onClick={() => setShowLogsRepoId(null)}
-              style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              style={{ background: 'hsla(217, 30%, 20%, 0.4)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '8px', padding: '6px', display: 'flex', transition: 'all 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--text-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
             >
-              <X size={20} />
+              <X size={18} />
             </button>
           </div>
           
-          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {indexLogs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 10px', color: 'var(--text-disabled)' }}>
-                No indexing runs recorded for this repository.
+              <div style={{ textAlign: 'center', padding: '40px 10px', color: 'var(--text-disabled)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                <Terminal size={32} style={{ color: 'var(--border-color)' }} />
+                <p>No indexing runs recorded for this repository.</p>
               </div>
             ) : (
               indexLogs.map((log) => (
@@ -730,20 +1133,20 @@ export default function App() {
                     background: 'hsla(217, 30%, 10%, 0.3)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '8px'
+                    gap: '10px'
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <Clock size={12} />
                       {new Date(log.created_at).toLocaleString()}
                     </span>
                     <span style={{
-                      fontSize: '0.75rem',
+                      fontSize: '0.72rem',
                       fontWeight: 600,
                       color: log.status === 'completed' ? 'var(--accent-success)' : 'var(--accent-danger)',
                       background: log.status === 'completed' ? 'rgba(74, 222, 128, 0.1)' : 'rgba(248, 113, 113, 0.1)',
-                      padding: '2px 8px',
+                      padding: '3px 10px',
                       borderRadius: '10px',
                       display: 'flex',
                       alignItems: 'center',
@@ -754,9 +1157,15 @@ export default function App() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '16px', fontSize: '0.8rem', color: 'var(--text-main)' }}>
-                    <div>Files Ingested: <strong>{log.files_updated}</strong></div>
-                    <div>Duration: <strong>{(log.duration_ms / 1000).toFixed(2)}s</strong></div>
+                  <div style={{ display: 'flex', gap: '20px', fontSize: '0.82rem', color: 'var(--text-main)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <FileText size={12} style={{ color: 'var(--text-disabled)' }} />
+                      Files: <strong>{log.files_updated}</strong>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Clock size={12} style={{ color: 'var(--text-disabled)' }} />
+                      Duration: <strong>{(log.duration_ms / 1000).toFixed(2)}s</strong>
+                    </div>
                   </div>
 
                   {log.error_message && (
@@ -765,10 +1174,10 @@ export default function App() {
                       border: '1px solid hsla(346, 84%, 61%, 0.2)',
                       padding: '10px',
                       borderRadius: '6px',
-                      fontSize: '0.75rem',
+                      fontSize: '0.73rem',
                       color: 'var(--accent-danger)',
                       whiteSpace: 'pre-wrap',
-                      fontFamily: 'monospace'
+                      fontFamily: "'JetBrains Mono', monospace"
                     }}>
                       {log.error_message}
                     </pre>
@@ -793,63 +1202,67 @@ export default function App() {
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          backdropFilter: 'blur(5px)'
-        }}>
-          <div className="glass-panel animate-fade-in" style={{
+          backdropFilter: 'blur(5px)',
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowInstructions(false); }}
+        >
+          <div className="animate-fade-in" style={{
             width: '600px',
             maxWidth: '90%',
             background: 'var(--bg-surface)',
+            border: '1px solid var(--border-color)',
             borderRadius: '16px',
             padding: '28px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '20px'
+            gap: '20px',
+            boxShadow: 'var(--shadow-lg)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Github size={20} style={{ color: 'var(--primary)' }} />
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Github size={22} style={{ color: 'var(--primary)' }} />
                 Setup GitHub App Webhooks
               </h3>
               <button 
                 onClick={() => setShowInstructions(false)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer' }}
+                style={{ background: 'hsla(217, 30%, 20%, 0.4)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '8px', padding: '6px', display: 'flex' }}
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '14px', lineHeight: '1.6' }}>
-              <p>To enable <strong>auto-updating on push</strong> and <strong>automated PR reviews</strong>, configure a GitHub App with the following details:</p>
+            <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '14px', lineHeight: '1.65' }}>
+              <p>To enable <strong style={{ color: 'var(--text-main)' }}>auto-updating on push</strong> and <strong style={{ color: 'var(--text-main)' }}>automated PR reviews</strong>, configure a GitHub App:</p>
               
-              <ol style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <ol style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <li>
-                  Go to your GitHub Account Settings &rarr; <strong>Developer settings</strong> &rarr; <strong>GitHub Apps</strong> &rarr; <strong>New GitHub App</strong>.
+                  Go to GitHub <strong style={{ color: 'var(--text-main)' }}>Developer Settings</strong> → <strong style={{ color: 'var(--text-main)' }}>GitHub Apps</strong> → <strong style={{ color: 'var(--text-main)' }}>New GitHub App</strong>.
                 </li>
                 <li>
-                  Set the <strong>Webhook URL</strong> to your server's address:
-                  <code style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--primary)', padding: '3px 8px', borderRadius: '4px', fontFamily: 'monospace', display: 'block', margin: '4px 0', fontSize: '0.8rem' }}>
+                  Set the <strong style={{ color: 'var(--text-main)' }}>Webhook URL</strong> to:
+                  <code style={{ background: 'var(--bg-input)', border: '1px solid var(--border-color)', color: 'var(--primary)', padding: '6px 12px', borderRadius: '6px', fontFamily: "'JetBrains Mono', monospace", display: 'block', margin: '6px 0', fontSize: '0.8rem' }}>
                     http://YOUR_DOMAIN_OR_NGROK/api/webhook
                   </code>
                 </li>
                 <li>
-                  Configure the **Webhook secret** (matching GITHUB_WEBHOOK_SECRET in your `.env`).
+                  Set the <strong style={{ color: 'var(--text-main)' }}>Webhook secret</strong> (must match <code style={{ color: 'var(--primary)', fontSize: '0.82em' }}>GITHUB_WEBHOOK_SECRET</code> in your <code style={{ fontSize: '0.82em' }}>.env</code>).
                 </li>
                 <li>
-                  Provide the following **Permissions**:
-                  <ul style={{ paddingLeft: '20px', marginTop: '4px', color: 'var(--text-main)', fontSize: '0.85rem' }}>
-                    <li>Repository Contents: <strong>Read-only</strong> (for reading files on push)</li>
-                    <li>Pull Requests: <strong>Read & write</strong> (for leaving review comments)</li>
+                  Grant these <strong style={{ color: 'var(--text-main)' }}>Permissions</strong>:
+                  <ul style={{ paddingLeft: '20px', marginTop: '6px', color: 'var(--text-main)', fontSize: '0.85rem' }}>
+                    <li>Repository Contents: <strong>Read-only</strong></li>
+                    <li>Pull Requests: <strong>Read & write</strong></li>
                   </ul>
                 </li>
                 <li>
-                  Subscribe to the following **Events**:
-                  <ul style={{ paddingLeft: '20px', marginTop: '4px', color: 'var(--text-main)', fontSize: '0.85rem' }}>
+                  Subscribe to <strong style={{ color: 'var(--text-main)' }}>Events</strong>:
+                  <ul style={{ paddingLeft: '20px', marginTop: '6px', color: 'var(--text-main)', fontSize: '0.85rem' }}>
                     <li>Push</li>
                     <li>Pull request</li>
                   </ul>
                 </li>
                 <li>
-                  Generate a **Private Key** (.pem), download it, and paste it into your backend `.env` as the <strong>GITHUB_PRIVATE_KEY</strong> value.
+                  Generate a <strong style={{ color: 'var(--text-main)' }}>Private Key</strong> (.pem) and paste it into your backend <code style={{ fontSize: '0.82em' }}>.env</code> as <code style={{ color: 'var(--primary)', fontSize: '0.82em' }}>GITHUB_PRIVATE_KEY</code>.
                 </li>
               </ol>
             </div>
@@ -857,10 +1270,142 @@ export default function App() {
             <button 
               className="btn btn-primary" 
               onClick={() => setShowInstructions(false)}
-              style={{ alignSelf: 'flex-end', marginTop: '8px' }}
+              style={{ alignSelf: 'flex-end', marginTop: '4px' }}
             >
-              Done, close
+              Got it
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Tutorial / Onboarding Modal */}
+      {showTutorial && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.75)',
+          zIndex: 120,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          backdropFilter: 'blur(8px)',
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) dismissTutorial(); }}
+        >
+          <div className="animate-fade-in" style={{
+            width: '560px',
+            maxWidth: '92%',
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '20px',
+            padding: '36px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '24px',
+            boxShadow: '0 25px 60px -12px rgba(0,0,0,0.7)',
+            position: 'relative',
+          }}>
+            {/* Close button */}
+            <button 
+              onClick={dismissTutorial}
+              style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer', padding: '4px' }}
+            >
+              <X size={18} />
+            </button>
+
+            {/* Step indicator dots */}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+              {tutorialSteps.map((_, idx) => (
+                <div 
+                  key={idx}
+                  onClick={() => setTutorialStep(idx)}
+                  style={{ 
+                    width: idx === tutorialStep ? '24px' : '8px', 
+                    height: '8px', 
+                    borderRadius: '4px', 
+                    background: idx === tutorialStep ? 'var(--primary)' : 'var(--border-color)',
+                    transition: 'all 0.3s',
+                    cursor: 'pointer',
+                    boxShadow: idx === tutorialStep ? 'var(--shadow-glow)' : 'none',
+                  }} 
+                />
+              ))}
+            </div>
+            
+            {/* Content */}
+            <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', minHeight: '240px' }}>
+              <div style={{ 
+                width: '68px', 
+                height: '68px', 
+                borderRadius: '18px', 
+                background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.15))', 
+                border: '1px solid var(--border-color)',
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+              }}>
+                {tutorialSteps[tutorialStep].icon}
+              </div>
+              
+              <h3 style={{ fontSize: '1.3rem', fontWeight: 700 }}>
+                {tutorialSteps[tutorialStep].title}
+              </h3>
+              
+              <p style={{ fontSize: '0.92rem', color: 'var(--text-muted)', lineHeight: '1.65', maxWidth: '420px' }}>
+                {tutorialSteps[tutorialStep].description}
+              </p>
+
+              {tutorialSteps[tutorialStep].code && (
+                <pre style={{
+                  background: 'hsla(222, 47%, 6%, 0.95)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '10px',
+                  padding: '14px 18px',
+                  fontSize: '0.8rem',
+                  lineHeight: '1.6',
+                  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                  color: 'var(--primary)',
+                  textAlign: 'left',
+                  width: '100%',
+                  maxWidth: '420px',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {tutorialSteps[tutorialStep].code}
+                </pre>
+              )}
+            </div>
+
+            {/* Navigation buttons */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                onClick={() => setTutorialStep(Math.max(0, tutorialStep - 1))}
+                className="btn btn-secondary"
+                style={{ visibility: tutorialStep === 0 ? 'hidden' : 'visible', fontSize: '0.88rem' }}
+              >
+                Back
+              </button>
+
+              {tutorialStep < tutorialSteps.length - 1 ? (
+                <button 
+                  onClick={() => setTutorialStep(tutorialStep + 1)}
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem' }}
+                >
+                  Next <ArrowRight size={16} />
+                </button>
+              ) : (
+                <button 
+                  onClick={dismissTutorial}
+                  className="btn btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem' }}
+                >
+                  <Sparkles size={16} /> Start Using
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

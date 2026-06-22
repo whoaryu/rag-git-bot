@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { App } from '@octokit/app';
+import { Octokit } from '@octokit/rest';
 import { pool } from '../config/db.js';
 import { chunkFile } from '../services/chunker.js';
 import { generateEmbedding } from '../services/embeddings.js';
@@ -26,6 +27,7 @@ if (appId && privateKey && webhookSecret) {
   octokitApp = new App({
     appId,
     privateKey,
+    Octokit: Octokit,
     webhooks: {
       secret: webhookSecret,
     },
@@ -118,7 +120,7 @@ router.post('/webhook', verifyGithubSignature, async (req: Request, res: Respons
       return;
     }
 
-    const octokit = await octokitApp.getInstallationOctokit(installationId);
+    const octokit = (await octokitApp.getInstallationOctokit(installationId)) as any;
 
     // 1. Push Event -> Incremental Indexing
     if (event === 'push') {

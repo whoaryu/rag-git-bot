@@ -31,7 +31,7 @@ docker-compose up -d
 ### 2. Configure Backend Server
 Create a `.env` file in the `backend/` folder:
 ```env
-PORT=3002
+PORT=3001
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rag_git_bot
 REDIS_URL=redis://localhost:6379
 QDRANT_URL=http://localhost:6333
