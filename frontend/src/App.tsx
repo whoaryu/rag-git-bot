@@ -61,7 +61,7 @@ interface Message {
   created_at?: string;
 }
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = (import.meta.env.VITE_API_BASE as string) || 'http://localhost:3001/api';
 
 export default function App() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -516,6 +516,7 @@ export default function App() {
                 style={{ padding: '10px 14px' }}
               />
               <button 
+                id="add-repo-button"
                 type="submit" 
                 className="btn btn-primary" 
                 disabled={addingRepo || !githubUrlInput || backendStatus === 'offline'}
@@ -938,40 +939,174 @@ export default function App() {
             </div>
           </>
         ) : (
-          /* Empty Workspace selection placeholder */
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px', color: 'var(--text-disabled)' }}>
-            <div style={{
-              width: '100px',
-              height: '100px',
-              borderRadius: '24px',
-              background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.08))',
-              border: '1px solid var(--border-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '24px',
-              boxShadow: 'var(--shadow-glow)',
-            }}>
-              <GitBranch size={40} style={{ color: 'var(--primary)' }} />
+          /* Visual Tutorial Dashboard Home */
+          <div style={{ 
+            flex: 1, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            padding: '40px', 
+            overflowY: 'auto',
+            background: 'radial-gradient(circle at center, hsla(250, 95%, 70%, 0.02) 0%, transparent 70%)'
+          }}>
+            {/* Header Area */}
+            <div style={{ textAlign: 'center', marginBottom: '40px', maxWidth: '650px' }} className="animate-fade-in">
+              <div style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '20px',
+                background: 'linear-gradient(135deg, var(--primary-glow), hsla(250, 95%, 70%, 0.05))',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 24px auto',
+                boxShadow: 'var(--shadow-glow)',
+              }}>
+                <Sparkles size={36} style={{ color: 'var(--primary)' }} />
+              </div>
+              <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)', marginBottom: '12px', background: 'linear-gradient(135deg, var(--text-main), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RAG Git Assistant</h2>
+              <p style={{ fontSize: '0.98rem', color: 'var(--text-muted)', lineHeight: '1.7' }}>
+                Supercharge your codebase navigation. Connect any public GitHub repository to chat semantically with your code, trace definitions, and audit logic in real-time.
+              </p>
             </div>
-            <h2 style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-main)', marginBottom: '10px', background: 'linear-gradient(135deg, var(--text-main), var(--primary))', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>RAG Git Assistant</h2>
-            <p style={{ fontSize: '0.95rem', color: 'var(--text-muted)', maxWidth: '450px', textAlign: 'center', lineHeight: '1.7', marginBottom: '24px' }}>
-              Select a repository from the sidebar to chat and search code segments, or paste a GitHub URL to index a new codebase.
-            </p>
-            
-            <div style={{ display: 'flex', gap: '12px' }}>
+
+            {/* Visual Guide Grid */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', 
+              gap: '24px', 
+              width: '100%', 
+              maxWidth: '920px', 
+              marginBottom: '40px' 
+            }} className="animate-fade-in">
+              
+              {/* Card 1 */}
+              <div 
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  position: 'relative',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  overflow: 'hidden'
+                }}
+                className="tutorial-step-card"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--primary)';
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = 'var(--shadow-glow)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-color)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{ position: 'absolute', top: '16px', right: '20px', fontSize: '2.5rem', fontWeight: 800, color: 'var(--primary)', opacity: 0.08, userSelect: 'none' }}>01</div>
+                <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'hsla(250, 95%, 70%, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <GitBranch size={20} style={{ color: 'var(--primary)' }} />
+                </div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600 }}>1. Index Repository</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.6', flexGrow: 1 }}>
+                  Paste any public GitHub URL (e.g. <code>https://github.com/...</code>) in the input bar in the left sidebar, and click the index icon to initiate ingestion.
+                </p>
+              </div>
+
+              {/* Card 2 */}
+              <div 
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  position: 'relative',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  overflow: 'hidden'
+                }}
+                className="tutorial-step-card"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--accent-info)';
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 0 20px 0 rgba(96, 165, 250, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-color)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{ position: 'absolute', top: '16px', right: '20px', fontSize: '2.5rem', fontWeight: 800, color: 'var(--accent-info)', opacity: 0.08, userSelect: 'none' }}>02</div>
+                <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'rgba(96, 165, 250, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Database size={20} style={{ color: 'var(--accent-info)' }} />
+                </div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600 }}>2. Vector Embeddings</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.6', flexGrow: 1 }}>
+                  The backend performs a shallow clone, chunks code files semantically, requests Gemini embeddings, and indexes vectors into Qdrant for fast query matching.
+                </p>
+              </div>
+
+              {/* Card 3 */}
+              <div 
+                style={{
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '16px',
+                  padding: '24px',
+                  position: 'relative',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                  overflow: 'hidden'
+                }}
+                className="tutorial-step-card"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--accent-success)';
+                  e.currentTarget.style.transform = 'translateY(-4px)';
+                  e.currentTarget.style.boxShadow = '0 0 20px 0 rgba(74, 222, 128, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--border-color)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{ position: 'absolute', top: '16px', right: '20px', fontSize: '2.5rem', fontWeight: 800, color: 'var(--accent-success)', opacity: 0.08, userSelect: 'none' }}>03</div>
+                <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: 'rgba(74, 222, 128, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MessageSquare size={20} style={{ color: 'var(--accent-success)' }} />
+                </div>
+                <h3 style={{ fontSize: '1.05rem', fontWeight: 600 }}>3. Chat & Cite Code</h3>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: '1.6', flexGrow: 1 }}>
+                  Select the completed repository, ask questions in the chat, and inspect matched code snippets directly using the citations side drawer.
+                </p>
+              </div>
+
+            </div>
+
+            {/* Action Guide Button */}
+            <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', zIndex: 5 }} className="animate-fade-in">
               <button 
+                id="dashboard-guide-button"
                 className="btn btn-primary"
                 onClick={() => { setShowTutorial(true); setTutorialStep(0); }}
                 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
               >
-                <BookOpen size={16} /> Getting Started Guide
+                <BookOpen size={16} /> Open Interactive Setup Guide
               </button>
             </div>
 
             {backendStatus === 'offline' && (
               <div style={{ 
-                marginTop: '28px', 
+                marginTop: '32px', 
                 padding: '16px 24px', 
                 borderRadius: '12px', 
                 background: 'hsla(346, 84%, 61%, 0.08)', 
@@ -981,19 +1116,21 @@ export default function App() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                maxWidth: '460px',
-              }}>
+                maxWidth: '480px',
+                zIndex: 5
+              }} className="animate-fade-in">
                 <AlertTriangle size={18} />
                 <div>
                   <strong>Backend server is not reachable.</strong>
                   <p style={{ fontSize: '0.8rem', marginTop: '4px', color: 'var(--text-muted)' }}>
-                    Make sure Docker services and the backend are running. See the Getting Started guide for details.
+                    Make sure Docker services (Postgres, Redis, Qdrant) and the Node API are running. See the getting started guide for details.
                   </p>
                 </div>
               </div>
             )}
           </div>
         )}
+
 
       </main>
 
@@ -1224,6 +1361,7 @@ export default function App() {
                 Setup GitHub App Webhooks
               </h3>
               <button 
+                id="close-instructions-modal"
                 onClick={() => setShowInstructions(false)}
                 style={{ background: 'hsla(217, 30%, 20%, 0.4)', border: '1px solid var(--border-color)', color: 'var(--text-muted)', cursor: 'pointer', borderRadius: '8px', padding: '6px', display: 'flex' }}
               >
@@ -1268,6 +1406,7 @@ export default function App() {
             </div>
 
             <button 
+              id="close-instructions-got-it"
               className="btn btn-primary" 
               onClick={() => setShowInstructions(false)}
               style={{ alignSelf: 'flex-end', marginTop: '4px' }}
@@ -1310,6 +1449,7 @@ export default function App() {
           }}>
             {/* Close button */}
             <button 
+              id="close-tutorial-modal"
               onClick={dismissTutorial}
               style={{ position: 'absolute', top: '16px', right: '16px', background: 'transparent', border: 'none', color: 'var(--text-disabled)', cursor: 'pointer', padding: '4px' }}
             >
@@ -1381,6 +1521,7 @@ export default function App() {
             {/* Navigation buttons */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button
+                id="tutorial-back-button"
                 onClick={() => setTutorialStep(Math.max(0, tutorialStep - 1))}
                 className="btn btn-secondary"
                 style={{ visibility: tutorialStep === 0 ? 'hidden' : 'visible', fontSize: '0.88rem' }}
@@ -1390,6 +1531,7 @@ export default function App() {
 
               {tutorialStep < tutorialSteps.length - 1 ? (
                 <button 
+                  id="tutorial-next-button"
                   onClick={() => setTutorialStep(tutorialStep + 1)}
                   className="btn btn-primary"
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem' }}
@@ -1398,6 +1540,7 @@ export default function App() {
                 </button>
               ) : (
                 <button 
+                  id="tutorial-start-button"
                   onClick={dismissTutorial}
                   className="btn btn-primary"
                   style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem' }}

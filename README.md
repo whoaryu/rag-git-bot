@@ -62,6 +62,8 @@ npm install
 npm run dev
 ```
 
+*Note: By default, the frontend connects to the backend at `http://localhost:3001/api`. If you customize the backend port, you can configure it for the frontend by creating a `frontend/.env` file with `VITE_API_BASE=http://localhost:your_port/api`.*
+
 ---
 
 ## 🛡️ Setting Up the GitHub App Integrations
