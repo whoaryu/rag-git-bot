@@ -4,6 +4,28 @@ A dual-purpose AI developer tool: a **RAG-powered chat assistant** that answers 
 
 ---
 
+## 📸 Demo & Screenshots
+
+### Video Walkthrough
+https://github.com/user-attachments/assets/ragmp4.mp4 (Or play/view the local video file [ragmp4.mp4](file:///c:/Users/Dell/Downloads/koding%20repos/rag-git-bot/ragmp4.mp4) directly)
+
+<p align="center">
+  <video src="ragmp4.mp4" width="100%" controls muted></video>
+</p>
+
+### Screenshots
+
+<p align="center">
+  <img src="rag1.png" alt="RAG Dashboard" width="49%" />
+  <img src="rag2.png" alt="Chat Assistant" width="49%" />
+</p>
+<p align="center">
+  <img src="rag3.png" alt="Indexing Progress" width="49%" />
+  <img src="rag4.png" alt="GitHub Integration" width="49%" />
+</p>
+
+---
+
 ## 🏗️ Project Architecture Layout
 
 The repository is divided into a self-contained Node/TypeScript `backend/` and React `frontend/` directories:

@@ -20,7 +20,7 @@ const groq = new OpenAI({
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
 router.post('/ask', async (req: Request, res: Response) => {
   const { repoId, question, conversationHistory = [] } = req.body;
