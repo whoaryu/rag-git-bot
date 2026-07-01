@@ -10,13 +10,19 @@ const connectionString = process.env.DATABASE_URL;
 
 export const pool = new Pool(
   connectionString
-    ? { connectionString }
+    ? {
+        connectionString,
+        ssl: connectionString.includes('localhost') || connectionString.includes('127.0.0.1')
+          ? false
+          : { rejectUnauthorized: false }
+      }
     : {
         host: process.env.DB_HOST || 'localhost',
         port: parseInt(process.env.DB_PORT || '5432'),
         user: process.env.DB_USER || 'postgres',
         password: process.env.DB_PASSWORD || 'postgres',
         database: process.env.DB_NAME || 'rag_git_bot',
+        ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
       }
 );
 
