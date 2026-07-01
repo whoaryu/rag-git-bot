@@ -8,7 +8,9 @@ A dual-purpose AI developer tool: a **RAG-powered chat assistant** that answers 
 
 ### Video Walkthrough
 
-https://github.com/whoaryu/rag-git-bot/blob/main/ragmp4.mp4
+https://github.com/user-attachments/assets/a2b7c721-afee-4d65-a01a-3c19a4715ef3
+
+
 
 <p align="center">
   <video src="ragmp4.mp4" width="100%" controls muted></video>
