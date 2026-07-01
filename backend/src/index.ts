@@ -32,6 +32,9 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/health', (req, res) => {
   res.json({ status: 'healthy', timestamp: new Date() });
 });
+app.get('/ping', (req, res) => {
+  res.json({ status: 'healthy', timestamp: new Date() });
+});
 
 // Mounting Routes
 app.use('/api', repoRouter);

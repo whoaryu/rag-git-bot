@@ -93,7 +93,7 @@ export default function App() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const res = await fetch(`${API_BASE.replace('/api', '')}/health`);
+        const res = await fetch(`${API_BASE.replace('/api', '')}/ping`);
         if (res.ok) setBackendStatus('online');
         else setBackendStatus('offline');
       } catch {
